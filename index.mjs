@@ -197,6 +197,11 @@ export default function setup(api) {
     name: 'rqbit',
     icon: 'M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z',
     menu: async () => (list.length ? [{ id: 'home', title: 'rqbit' }] : []),
+    // Films and episodes: ◀ ▶ skip, ▼ settings (audio, subtitles). Without this the player gets the keys for live.
+    player: {
+      keys: { ok: 'pause', up: 'info', down: 'settings', left: 'seek_back', right: 'seek_forward' },
+      settings: [{ type: 'audio', title: api.t('Audio') }, { type: 'subtitles', title: api.t('Subtitles') }],
+    },
 
     async view() {
       return {
