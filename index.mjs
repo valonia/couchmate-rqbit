@@ -49,12 +49,12 @@ export default function setup(api) {
   let playingHash = null;
 
   /** Makes sure rqbit has the torrent and fetches file [i] (with the ones it already fetches) – and runs. */
-  async function want(t, i) {
+  async function want(t, i, aheadCount = null) {
     used.set(t.hash, Date.now());
     // The one being watched and the next few after it (the next episodes are ready when they start).
     const videos = videosOf(t);
     const at = videos.findIndex((f) => f.i === i);
-    const ahead = Math.max(0, Number(api.settings.ahead ?? 4) | 0);
+    const ahead = aheadCount ?? Math.max(0, Number(api.settings.ahead ?? 4) | 0);
     const wanted = [i, ...(at >= 0 ? videos.slice(at + 1, at + 1 + ahead).map((f) => f.i) : [])];
     let details = null;
     try { details = await call('GET', `/torrents/${t.hash}`); } catch { /* not in rqbit (yet) */ }
@@ -89,7 +89,8 @@ export default function setup(api) {
       sizes.set(hash, s);
       total += s?.progress_bytes || 0;
       const idle = hash !== playingHash && Date.now() - (used.get(hash) || 0) > IDLE_MS;
-      if (idle && s && s.state !== 'paused') await call('POST', `/torrents/${hash}/pause`).catch(() => {});
+      // Only once what it should fetch is downloaded: then it stops uploading. Unfinished downloads carry on.
+      if (idle && s && s.finished && s.state !== 'paused') await call('POST', `/torrents/${hash}/pause`).catch(() => {});
     }
     const order = [...have.keys()].filter((h) => h !== playingHash)
       .sort((a, b) => (find(a)?.playedAt || 0) - (find(b)?.playedAt || 0));
@@ -121,6 +122,11 @@ export default function setup(api) {
     save();
     api.menuChanged();
     api.log(`[rqbit] added "${t.name}" (${videosOf(t).length} videos)`);
+    // Start on the first video straight away (with the end of its file, for seeking), so it is ready to play.
+    const first = videosOf(t)[0];
+    if (first && api.settings.startOnAdd !== false) {
+      want(t, first.i, 0).then(() => tailFirst(t, first)).catch((e) => api.log(`[rqbit] ${t.name}: ${e.message}`));
+    }
     return t;
   }
 
