@@ -54,7 +54,7 @@ export default function setup(api) {
     // The one being watched and the next few after it (the next episodes are ready when they start).
     const videos = videosOf(t);
     const at = videos.findIndex((f) => f.i === i);
-    const ahead = Math.max(0, Number(api.settings.ahead ?? 2) | 0);
+    const ahead = Math.max(0, Number(api.settings.ahead ?? 4) | 0);
     const wanted = [i, ...(at >= 0 ? videos.slice(at + 1, at + 1 + ahead).map((f) => f.i) : [])];
     let details = null;
     try { details = await call('GET', `/torrents/${t.hash}`); } catch { /* not in rqbit (yet) */ }
