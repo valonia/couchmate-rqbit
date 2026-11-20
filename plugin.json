@@ -1,0 +1,24 @@
+{
+  "id": "rqbit",
+  "name": "rqbit",
+  "version": "1.0.0",
+  "description": "Watch a torrent together through rqbit (a torrent client with streaming): add a magnet link or a .torrent file on the plugin's page in the admin panel, and its videos stream to everyone in the room while they download – whatever is being watched comes first, also when you skip ahead. Episodes play in order, the next one after the last.",
+  "main": "index.mjs",
+  "repository": "valonia/couchmate-rqbit",
+  "homepage": "https://github.com/valonia/couchmate-rqbit",
+  "requires": "rqbit (github.com/ikatson/rqbit) running where the server reaches its HTTP API, e.g. in Docker next to Couchmate. Only add torrents you have the right to download and share: a torrent always uploads to others while it downloads.",
+  "settings": [
+    {
+      "key": "url",
+      "label": "rqbit's HTTP API",
+      "type": "text",
+      "default": "http://host.docker.internal:3030"
+    },
+    {
+      "key": "maxGB",
+      "label": "Disk space for downloads (GB)",
+      "type": "number",
+      "default": 60
+    }
+  ]
+}
