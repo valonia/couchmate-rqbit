@@ -253,6 +253,23 @@ export default function setup(api) {
 
   // ------------------------------------------------------------------ streaming to the apps
 
+  // MKV and MP4 files often keep their index (Cues / moov) at the end. The players read it when the video opens –
+  // without it they cannot seek at all. rqbit fetches from the start, so the end is fetched first, once per file.
+  const TAIL = 12 * 1024 * 1024;
+  const tails = new Map(); // "hash:i" → Promise
+  function tailFirst(t, f) {
+    const key = `${t.hash}:${f.i}`;
+    if (!tails.has(key)) {
+      const from = Math.max(0, f.length - TAIL);
+      const job = (async () => {
+        const r = await fetch(`${rq()}/torrents/${t.hash}/stream/${f.i}`, { headers: { range: `bytes=${from}-${f.length - 1}` }, signal: AbortSignal.timeout(90000) });
+        if (r.body) for await (const chunk of r.body) void chunk; // read it all: rqbit has then downloaded it
+      })().catch((e) => { tails.delete(key); api.log(`[rqbit] ${t.name}: the end of the file could not be fetched first – ${e.message}`); });
+      tails.set(key, job);
+    }
+    return tails.get(key);
+  }
+
   api.route('GET', '/stream/*', async (req, res, { path: rest }) => {
     const m = /^([a-f0-9]{40})\/(\d{1,5})$/.exec(rest);
     const hit = m && parseId(`f:${m[1]}:${m[2]}`);
@@ -263,6 +280,7 @@ export default function setup(api) {
       api.log(`[rqbit] ${hit.t.name}: ${e.message}`);
       res.writeHead(502); return res.end();
     }
+    await tailFirst(hit.t, hit.f);
     // rqbit holds the response until the requested part has downloaded, fetching it first.
     api.proxy(req, res, `${rq()}/torrents/${hit.t.hash}/stream/${hit.f.i}`);
   });
