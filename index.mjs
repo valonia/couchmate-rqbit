@@ -212,6 +212,8 @@ export default function setup(api) {
     // Films and episodes: ◀ ▶ skip, ▼ settings (audio, subtitles). Without this the player gets the keys for live.
     player: {
       keys: { ok: 'pause', up: 'info', down: 'settings', left: 'seek_back', right: 'seek_forward' },
+      // "Next episode" counts down the last 10 seconds, and the next one starts as this one ends.
+      upNextBefore: 10,
       settings: [{ type: 'audio', title: api.t('Audio') }, { type: 'subtitles', title: api.t('Subtitles') }],
     },
 
