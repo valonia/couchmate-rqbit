@@ -25,8 +25,9 @@ export default function setup(api) {
   // ------------------------------------------------------------------ rqbit's HTTP API
 
   const rq = () => String(api.settings.url || 'http://host.docker.internal:3030').replace(/\/+$/, '');
-  async function call(method, p, body, { timeout = 30000 } = {}) {
-    const r = await fetch(rq() + p, { method, body, signal: AbortSignal.timeout(timeout) });
+  async function call(method, p, body, { timeout = 30000, json = false } = {}) {
+    const headers = json ? { 'content-type': 'application/json' } : {};
+    const r = await fetch(rq() + p, { method, body, headers, signal: AbortSignal.timeout(timeout) });
     const text = await r.text();
     if (!r.ok) throw new Error(`rqbit: ${text.slice(0, 200) || r.status}`);
     try { return JSON.parse(text); } catch { return text; }
@@ -50,15 +51,20 @@ export default function setup(api) {
   /** Makes sure rqbit has the torrent and fetches file [i] (with the ones it already fetches) – and runs. */
   async function want(t, i) {
     used.set(t.hash, Date.now());
+    // The one being watched and the next few after it (the next episodes are ready when they start).
+    const videos = videosOf(t);
+    const at = videos.findIndex((f) => f.i === i);
+    const ahead = Math.max(0, Number(api.settings.ahead ?? 2) | 0);
+    const wanted = [i, ...(at >= 0 ? videos.slice(at + 1, at + 1 + ahead).map((f) => f.i) : [])];
     let details = null;
     try { details = await call('GET', `/torrents/${t.hash}`); } catch { /* not in rqbit (yet) */ }
     if (!details) {
-      await call('POST', `/torrents?overwrite=true&only_files=${i}`, sourceOf(t), { timeout: 120000 });
-      return;
+      await call('POST', `/torrents?overwrite=true&only_files=${wanted.join(',')}`, sourceOf(t), { timeout: 120000 });
+      details = await call('GET', `/torrents/${t.hash}`).catch(() => null);
     }
-    const included = (details.files || []).map((f, n) => (f.included ? n : -1)).filter((n) => n >= 0);
-    if (!included.includes(i)) {
-      await call('POST', `/torrents/${t.hash}/update_only_files`, JSON.stringify({ only_files: [...included, i] }));
+    const included = (details?.files || []).map((f, n) => (f.included ? n : -1)).filter((n) => n >= 0);
+    if (wanted.some((n) => !included.includes(n))) {
+      await call('POST', `/torrents/${t.hash}/update_only_files`, JSON.stringify({ only_files: [...new Set([...included, ...wanted])] }), { json: true });
     }
     const stats = await call('GET', `/torrents/${t.hash}/stats/v1`).catch(() => null);
     if (stats?.state === 'paused') await call('POST', `/torrents/${t.hash}/start`).catch(() => {});
