@@ -408,7 +408,7 @@ document.getElementById('file')?.addEventListener('change', async (ev) => {
               + '<span class="stat">' + size(s.done) + ' of ' + size(s.wanted) + ' (' + pct.toFixed(0) + ' %)</span>'
               + (s.eta && !finished ? '<span class="stat dim">about ' + time(s.eta) + ' left</span>' : '')
               + '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>';
-            eps.innerHTML = s.files.length > 1 ? s.files.filter((f) => f.wanted || f.done > 0).map((f) =>
+            eps.innerHTML = s.files.length > 1 ? s.files.filter((f) => f.wanted || f.done >= f.length / 100).map((f) =>
               '<div class="ep"><span>' + f.label + '</span><div class="bar"><i style="width:' + (100 * f.done / f.length).toFixed(1) + '%"></i></div><span class="dim">' + (100 * f.done / f.length).toFixed(0) + ' %</span></div>').join('') : '';
           }
         } catch {}
