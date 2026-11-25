@@ -10,7 +10,7 @@ with streaming built in.
   order. "Next episode" shows 10 s before the end.
 - **Downloads ahead.** Only the episode being watched and the next few (4 by default) are downloaded, and whatever
   is being watched comes first, also when you skip ahead.
-- **Starts straight away.** When a torrent is added, the first video starts downloading, so it is ready when you
+- **Starts straight away.** When you have chosen the videos, the first one starts downloading, so it is ready when you
   want to watch it.
 - **Seeking works**, also in MKV files whose index sits at the end of the file (the plugin fetches it first).
 - **Status page** in the admin panel: speed, peers (TCP and uTP), progress and time left for every episode,
@@ -57,7 +57,7 @@ its settings. Open **rqbit** on the plugin's card to add torrents and see their 
 
 - **rqbit's HTTP API** – how the Couchmate server reaches rqbit, e.g. `http://host.docker.internal:3030`.
 - **Episodes to download ahead of the one playing** – 4 by default. Raise it if downloads are slow.
-- **Start downloading the first video when a torrent is added**
+- **Start downloading the first video when a torrent is added** – with several videos, once you have saved which ones.
 - **Disk space for downloads (GB)** – the oldest downloads are removed above this.
 
 ## Updates
@@ -67,4 +67,4 @@ click, or switch on **Update automatically** to have new versions installed by t
 nobody is watching.
 
 To release a new version: raise `version` in `plugin.json`, commit, and publish a GitHub release tagged
-`v<version>` (e.g. `v1.5.0`).
+`v<version>` (e.g. `v1.5.1`).

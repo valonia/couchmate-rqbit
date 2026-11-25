@@ -122,12 +122,23 @@ export default function setup(api) {
     save();
     api.menuChanged();
     api.log(`[rqbit] added "${t.name}" (${videosOf(t).length} videos)`);
-    // Start on the first video straight away (with the end of its file, for seeking), so it is ready to play.
+    // Several videos: the admin chooses which first, and the download starts when that is saved. One video: it
+    // starts straight away.
+    if (videosOf(t).length > 1) {
+      t.choosing = true;
+      save();
+    } else {
+      startFirst(t);
+    }
+    return t;
+  }
+
+  /** Starts on the first ticked video (with the end of its file, for seeking), so it is ready to play. */
+  function startFirst(t) {
     const first = videosOf(t)[0];
     if (first && api.settings.startOnAdd !== false) {
       want(t, first.i, 0).then(() => tailFirst(t, first)).catch((e) => api.log(`[rqbit] ${t.name}: ${e.message}`));
     }
-    return t;
   }
 
   async function remove(hash) {
@@ -412,7 +423,7 @@ document.querySelectorAll('[data-all]').forEach((a) => a.addEventListener('click
       // Which videos to keep: all ticked from the start; untick the ones you do not want (they never download).
       const pick = all.length > 1 ? `<details class="pick"${query.get('pick') === t.hash ? ' open' : ''}><summary>Choose videos</summary>
         <form method="post" action="${base}/files"><input type="hidden" name="hash" value="${esc(t.hash)}">
-        <p class="dim">Untick what you do not want – it is not downloaded and does not show in the apps.
+        <p class="dim">Untick what you do not want – it is not downloaded and does not show in the apps.${t.choosing && api.settings.startOnAdd !== false ? ' The download starts when you save.' : ''}
         <a href="#" data-all="1">All</a> · <a href="#" data-all="0">None</a></p>
         ${all.map((f) => `<label class="file"><input type="checkbox" name="keep" value="${f.i}"${skipped(t, f.i) ? '' : ' checked'}>
           <span class="grow">${esc(f.ep ? [f.ep.label, f.ep.name].filter(Boolean).join(' · ') : fileName(f.name))}</span><span class="dim">${gb(f.length)}</span></label>`).join('')}
@@ -489,6 +500,12 @@ document.querySelectorAll('[data-all]').forEach((a) => a.addEventListener('click
     api.menuChanged();
     api.log(`[rqbit] "${t.name}": ${videosOf(t).length} of ${allVideosOf(t).length} videos ticked`);
     await applySkip(t).catch((e) => api.log(`[rqbit] ${t.name}: ${e.message}`));
+    // The first save after adding: now the download may start.
+    if (t.choosing) {
+      delete t.choosing;
+      save();
+      startFirst(t);
+    }
     back(res);
   }, { auth: 'admin' });
 
