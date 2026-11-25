@@ -4,6 +4,8 @@ Watch a torrent together. Add a magnet link or a `.torrent` file in the admin pa
 everyone in the room while they download, through [rqbit](https://github.com/ikatson/rqbit), a fast torrent client
 with streaming built in.
 
+- **Choose what to download.** Right after adding a torrent its videos show with a tick each, all ticked. Untick
+  the ones you do not want: they are never downloaded and do not show in the apps. **Choose videos** changes it later.
 - **Pick any episode.** A season pack shows as a list in the apps (S01E01, S01E02 …), and the episodes play in
   order. "Next episode" shows 10 s before the end.
 - **Downloads ahead.** Only the episode being watched and the next few (4 by default) are downloaded, and whatever
@@ -65,4 +67,4 @@ click, or switch on **Update automatically** to have new versions installed by t
 nobody is watching.
 
 To release a new version: raise `version` in `plugin.json`, commit, and publish a GitHub release tagged
-`v<version>` (e.g. `v1.4.1`).
+`v<version>` (e.g. `v1.5.0`).

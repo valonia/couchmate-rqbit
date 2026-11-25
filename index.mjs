@@ -16,7 +16,7 @@ export default function setup(api) {
   const filesDir = path.join(api.dataDir, 'torrent-files');
   fs.mkdirSync(filesDir, { recursive: true });
 
-  /** [{ hash, name, added, magnet?, files: [{ i, name, length }], playedAt? }] */
+  /** [{ hash, name, added, magnet?, files: [{ i, name, length }], skip?: [i], playedAt? }] – skip: videos unticked in the admin panel */
   let list = [];
   try { list = JSON.parse(fs.readFileSync(listFile, 'utf8')); } catch { /* none yet */ }
   const save = () => fs.writeFileSync(listFile, JSON.stringify(list, null, 1));
@@ -151,17 +151,41 @@ export default function setup(api) {
   const tidyName = (s) => s.replace(/\.[a-z0-9]{2,4}$/i, '').replace(/[._]+/g, ' ').replace(TAGS, '').replace(/[\s\-[(]+$/, '').trim();
   const fileName = (p) => p.split(/[\\/]/).pop();
   function episodeOf(name) {
-    const m = /^(.*?)[\s._-]*\bS(\d{1,2})[\s._-]?E(\d{1,3})\b[\s._-]*(.*)$/i.exec(fileName(name));
+    const m = /^(.*?)[\s._-]*\bS(\d{1,2})[\s._-]?E(\d{1,3})\b[\s._-]*(.*)$/i.exec(fileName(name).replace(/\.[a-z0-9]{2,4}$/i, ''));
     if (!m) return null;
     return { show: tidyName(m[1]), season: Number(m[2]), episode: Number(m[3]), label: `S${m[2].padStart(2, '0')}E${m[3].padStart(2, '0')}`, name: tidyName(m[4]) };
   }
 
-  /** A torrent's videos (no samples), in episode order when they are episodes, else by name. */
-  function videosOf(t) {
+  /** All of a torrent's videos (no samples), in episode order when they are episodes, else by name. */
+  function allVideosOf(t) {
     return t.files
       .filter((f) => VIDEO.test(f.name) && !/(^|[\\/._-])sample([\\/._-]|$)/i.test(f.name))
       .map((f) => ({ ...f, ep: episodeOf(f.name) }))
       .sort((a, b) => (a.ep && b.ep ? a.ep.season - b.ep.season || a.ep.episode - b.ep.episode : a.name.localeCompare(b.name, undefined, { numeric: true })));
+  }
+  const skipped = (t, i) => Boolean(t.skip?.includes(i));
+  /** The videos that are ticked: the ones the apps show and that may download. */
+  const videosOf = (t) => allVideosOf(t).filter((f) => !skipped(t, f.i));
+
+  /** After the ticks changed: rqbit stops fetching what was unticked. When nothing ticked is left to fetch, the first
+   *  ticked video starts (if new torrents start straight away), else the torrent pauses. */
+  async function applySkip(t) {
+    const details = await call('GET', `/torrents/${t.hash}`).catch(() => null);
+    if (!details) return;
+    const included = (details.files || []).map((f, n) => (f.included ? n : -1)).filter((n) => n >= 0);
+    const keep = included.filter((n) => !skipped(t, n));
+    if (keep.length === included.length && keep.length) return;
+    if (keep.length) {
+      await call('POST', `/torrents/${t.hash}/update_only_files`, JSON.stringify({ only_files: keep }), { json: true });
+      return;
+    }
+    const first = videosOf(t)[0];
+    if (first && api.settings.startOnAdd !== false) {
+      await call('POST', `/torrents/${t.hash}/update_only_files`, JSON.stringify({ only_files: [first.i] }), { json: true });
+      tailFirst(t, first);
+    } else {
+      await call('POST', `/torrents/${t.hash}/pause`).catch(() => {});
+    }
   }
 
   /** What the apps show: in the list (row) and while it plays (title, subtitle). */
@@ -200,7 +224,7 @@ export default function setup(api) {
     const m = /^f:([a-f0-9]{40}):(\d{1,5})$/.exec(id);
     const t = m && find(m[1]);
     const f = t?.files.find((x) => x.i === Number(m[2]));
-    return f ? { t, f } : null;
+    return f && !skipped(t, f.i) ? { t, f } : null;
   };
 
   // ------------------------------------------------------------------ the source
@@ -322,6 +346,8 @@ a{color:#7aa2ff}.card{background:#181b22;border-radius:12px;padding:16px 18px;ma
 textarea{width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid #333a48;background:#0f1115;color:#e8eaf0;font:13px monospace}
 .bar{height:4px;background:#262b35;border-radius:4px;margin-top:6px}.bar i{display:block;height:100%;background:#3d7bff;border-radius:4px;transition:width .5s}
 .live{margin-top:8px}.stat{display:inline-block;margin-right:14px;font-variant-numeric:tabular-nums}
+.pick{margin-top:8px}.pick summary{cursor:pointer;color:#7aa2ff}.pick p{margin:8px 0}
+.file{display:flex;gap:10px;align-items:center;padding:4px 0;font-size:13px;cursor:pointer}.file input{margin:0}
 .eps{margin-top:8px}.ep{display:grid;grid-template-columns:90px 1fr 44px;gap:10px;align-items:center;font-size:13px;font-variant-numeric:tabular-nums}.ep .bar{margin:0}
 </style></head><body><h1>rqbit</h1>${body}
 <script>
@@ -329,11 +355,18 @@ document.getElementById('file')?.addEventListener('change', async (ev) => {
   const f = ev.target.files[0]; if (!f) return;
   const b = new Uint8Array(await f.arrayBuffer()); let s = ''; for (const x of b) s += String.fromCharCode(x);
   const r = await fetch('${base}/add-file', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: btoa(s) }) });
-  location.href = '${base}/admin' + (r.ok ? '' : '?error=' + encodeURIComponent(await r.text()));
+  location.href = '${base}/admin?' + (r.ok ? 'pick=' : 'error=') + encodeURIComponent(await r.text());
 });
+document.querySelectorAll('[data-all]').forEach((a) => a.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  a.closest('form').querySelectorAll('input[name=keep]').forEach((c) => { c.checked = a.dataset.all === '1'; });
+}));
 </script></body></html>`);
   };
-  const back = (res, error) => { res.writeHead(303, { location: `${base}/admin${error ? `?error=${encodeURIComponent(error)}` : ''}` }); res.end(); };
+  const back = (res, error, pick) => {
+    const q = error ? `?error=${encodeURIComponent(error)}` : pick ? `?pick=${pick}` : '';
+    res.writeHead(303, { location: `${base}/admin${q}` }); res.end();
+  };
   const readBody = (req, max) => new Promise((resolve, reject) => {
     let b = '';
     req.on('data', (c) => { b += c; if (b.length > max) { reject(new Error('Too large')); req.destroy(); } });
@@ -372,10 +405,20 @@ document.getElementById('file')?.addEventListener('change', async (ev) => {
     const have = await present();
     const rows = [];
     for (const t of list) {
+      const all = allVideosOf(t);
       const videos = videosOf(t);
-      const size = t.files.reduce((n, f) => n + f.length, 0);
-      rows.push(`<div class="row"><span class="grow"><b>${esc(t.name)}</b><br><span class="dim">${videos.length} video${videos.length === 1 ? '' : 's'} · ${gb(size)}</span>
-        <div class="live" id="s-${t.hash}"><span class="dim">Not downloading – starts when someone watches.</span></div><div class="eps" id="e-${t.hash}"></div></span>
+      const size = videos.reduce((n, f) => n + f.length, 0);
+      const count = videos.length === all.length ? `${all.length} video${all.length === 1 ? '' : 's'}` : `${videos.length} of ${all.length} videos`;
+      // Which videos to keep: all ticked from the start; untick the ones you do not want (they never download).
+      const pick = all.length > 1 ? `<details class="pick"${query.get('pick') === t.hash ? ' open' : ''}><summary>Choose videos</summary>
+        <form method="post" action="${base}/files"><input type="hidden" name="hash" value="${esc(t.hash)}">
+        <p class="dim">Untick what you do not want – it is not downloaded and does not show in the apps.
+        <a href="#" data-all="1">All</a> · <a href="#" data-all="0">None</a></p>
+        ${all.map((f) => `<label class="file"><input type="checkbox" name="keep" value="${f.i}"${skipped(t, f.i) ? '' : ' checked'}>
+          <span class="grow">${esc(f.ep ? [f.ep.label, f.ep.name].filter(Boolean).join(' · ') : fileName(f.name))}</span><span class="dim">${gb(f.length)}</span></label>`).join('')}
+        <p><button class="btn blue small" type="submit">Save</button></p></form></details>` : '';
+      rows.push(`<div class="row"><span class="grow"><b>${esc(t.name)}</b><br><span class="dim">${count} · ${gb(size)}</span>
+        <div class="live" id="s-${t.hash}"><span class="dim">Not downloading – starts when someone watches.</span></div><div class="eps" id="e-${t.hash}"></div>${pick}</span>
         <form method="post" action="${base}/remove"><input type="hidden" name="hash" value="${esc(t.hash)}"><button class="btn small">Remove</button></form></div>`);
     }
     html(res, `${query.get('error') ? `<p class="err">${esc(query.get('error'))}</p>` : ''}
@@ -421,17 +464,32 @@ document.getElementById('file')?.addEventListener('change', async (ev) => {
     try {
       const magnet = new URLSearchParams(await readBody(req, 20000)).get('magnet')?.trim() || '';
       if (!/^magnet:\?/i.test(magnet) || !/xt=urn:btih:/i.test(magnet)) throw new Error('That is not a magnet link (magnet:?xt=urn:btih:…)');
-      await add(magnet, magnet);
-      back(res);
+      const t = await add(magnet, magnet);
+      back(res, null, t.hash);
     } catch (e) { back(res, e.message); }
   }, { auth: 'admin' });
 
   api.route('POST', '/add-file', async (req, res) => {
     try {
       const { data } = JSON.parse(await readBody(req, 8 * 1024 * 1024));
-      await add(Buffer.from(String(data), 'base64'));
-      res.writeHead(200); res.end('ok');
+      const t = await add(Buffer.from(String(data), 'base64'));
+      res.writeHead(200); res.end(t.hash);
     } catch (e) { res.writeHead(400); res.end(e.message || 'Not a torrent file'); }
+  }, { auth: 'admin' });
+
+  api.route('POST', '/files', async (req, res) => {
+    const form = new URLSearchParams(await readBody(req, 200000));
+    const t = find(form.get('hash') || '');
+    if (!t) return back(res, 'That torrent has been removed');
+    const keep = new Set(form.getAll('keep').map(Number));
+    if (!keep.size) return back(res, 'Tick at least one video – or remove the torrent.');
+    t.skip = allVideosOf(t).filter((f) => !keep.has(f.i)).map((f) => f.i);
+    if (!t.skip.length) delete t.skip;
+    save();
+    api.menuChanged();
+    api.log(`[rqbit] "${t.name}": ${videosOf(t).length} of ${allVideosOf(t).length} videos ticked`);
+    await applySkip(t).catch((e) => api.log(`[rqbit] ${t.name}: ${e.message}`));
+    back(res);
   }, { auth: 'admin' });
 
   api.route('POST', '/remove', async (req, res) => {
