@@ -67,4 +67,4 @@ click, or switch on **Update automatically** to have new versions installed by t
 nobody is watching.
 
 To release a new version: raise `version` in `plugin.json`, commit, and publish a GitHub release tagged
-`v<version>` (e.g. `v1.5.1`).
+`v<version>` (e.g. `v1.5.2`).

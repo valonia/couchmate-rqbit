@@ -48,8 +48,34 @@ export default function setup(api) {
   const used = new Map(); // hash → when it was last streamed
   let playingHash = null;
 
+  /** Keeps the .torrent file of a torrent added by magnet link: added again later (after a removed download, a
+   *  restart …), rqbit then has everything at once instead of looking the torrent up among other peers again – the
+   *  step where it could hang without an answer. */
+  async function keepTorrentFile(t) {
+    const file = path.join(filesDir, `${t.hash}.torrent`);
+    if (fs.existsSync(file)) return;
+    try {
+      const r = await fetch(`${rq()}/torrents/${t.hash}/metadata`, { signal: AbortSignal.timeout(15000) });
+      const b = Buffer.from(await r.arrayBuffer());
+      if (r.ok && b[0] === 0x64) await fsp.writeFile(file, b); // a bencoded dictionary starts with "d"
+    } catch { /* tried again next time */ }
+  }
+
+  /** Something wrong with a torrent, shown on the admin page until it works again: hash → message. */
+  const problems = new Map();
+
+  // One call at a time per torrent: two apps pressing play together would otherwise add the same torrent to rqbit
+  // twice at once, which can leave rqbit stuck.
+  const queues = new Map(); // hash → Promise
+  function want(t, i, aheadCount = null) {
+    const run = (queues.get(t.hash) || Promise.resolve()).catch(() => {}).then(() => wantNow(t, i, aheadCount));
+    queues.set(t.hash, run);
+    run.finally(() => { if (queues.get(t.hash) === run) queues.delete(t.hash); }).catch(() => {});
+    return run;
+  }
+
   /** Makes sure rqbit has the torrent and fetches file [i] (with the ones it already fetches) – and runs. */
-  async function want(t, i, aheadCount = null) {
+  async function wantNow(t, i, aheadCount) {
     used.set(t.hash, Date.now());
     // The one being watched and the next few after it (the next episodes are ready when they start).
     const videos = videosOf(t);
@@ -59,9 +85,19 @@ export default function setup(api) {
     let details = null;
     try { details = await call('GET', `/torrents/${t.hash}`); } catch { /* not in rqbit (yet) */ }
     if (!details) {
-      await call('POST', `/torrents?overwrite=true&only_files=${wanted.join(',')}`, sourceOf(t), { timeout: 120000 });
+      try {
+        await call('POST', `/torrents?overwrite=true&only_files=${wanted.join(',')}`, sourceOf(t), { timeout: 120000 });
+      } catch (e) {
+        const timeout = e.name === 'TimeoutError' || /timeout/i.test(e.message);
+        problems.set(t.hash, timeout
+          ? 'rqbit did not answer when the download was to start. If it stays like this, restart rqbit (docker restart rqbit).'
+          : `rqbit could not start the download: ${e.message}`);
+        throw e;
+      }
       details = await call('GET', `/torrents/${t.hash}`).catch(() => null);
     }
+    problems.delete(t.hash);
+    keepTorrentFile(t);
     const included = (details?.files || []).map((f, n) => (f.included ? n : -1)).filter((n) => n >= 0);
     if (wanted.some((n) => !included.includes(n))) {
       await call('POST', `/torrents/${t.hash}/update_only_files`, JSON.stringify({ only_files: [...new Set([...included, ...wanted])] }), { json: true });
@@ -81,6 +117,7 @@ export default function setup(api) {
   async function tidy() {
     const have = await present();
     if (!have) return;
+    for (const t of list) if (have.has(t.hash)) await keepTorrentFile(t);
     const max = Math.max(1, Number(api.settings.maxGB) || 60) * 1024 ** 3;
     let total = 0;
     const sizes = new Map();
@@ -102,6 +139,7 @@ export default function setup(api) {
     }
   }
   const sweep = setInterval(() => tidy().catch(() => {}), 5 * 60 * 1000);
+  const firstSweep = setTimeout(() => tidy().catch(() => {}), 30 * 1000); // e.g. keeps the .torrent files soon after a start
 
   // ------------------------------------------------------------------ adding and removing
 
@@ -428,7 +466,7 @@ document.querySelectorAll('[data-all]').forEach((a) => a.addEventListener('click
         ${all.map((f) => `<label class="file"><input type="checkbox" name="keep" value="${f.i}"${skipped(t, f.i) ? '' : ' checked'}>
           <span class="grow">${esc(f.ep ? [f.ep.label, f.ep.name].filter(Boolean).join(' · ') : fileName(f.name))}</span><span class="dim">${gb(f.length)}</span></label>`).join('')}
         <p><button class="btn blue small" type="submit">Save</button></p></form></details>` : '';
-      rows.push(`<div class="row"><span class="grow"><b>${esc(t.name)}</b><br><span class="dim">${count} · ${gb(size)}</span>
+      rows.push(`<div class="row"><span class="grow"><b>${esc(t.name)}</b><br><span class="dim">${count} · ${gb(size)}</span>${problems.has(t.hash) ? `<br><span class="err">${esc(problems.get(t.hash))}</span>` : ''}
         <div class="live" id="s-${t.hash}"><span class="dim">Not downloading – starts when someone watches.</span></div><div class="eps" id="e-${t.hash}"></div>${pick}</span>
         <form method="post" action="${base}/remove"><input type="hidden" name="hash" value="${esc(t.hash)}"><button class="btn small">Remove</button></form></div>`);
     }
@@ -517,5 +555,5 @@ document.querySelectorAll('[data-all]').forEach((a) => a.addEventListener('click
 
   api.link('rqbit', `${base}/admin`);
 
-  return () => clearInterval(sweep);
+  return () => { clearInterval(sweep); clearTimeout(firstSweep); };
 }
