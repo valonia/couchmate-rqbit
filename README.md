@@ -13,6 +13,8 @@ with streaming built in.
 - **Starts straight away.** When you have chosen the videos, the first one starts downloading, so it is ready when you
   want to watch it.
 - **Seeking works**, also in MKV files whose index sits at the end of the file (the plugin fetches it first).
+- **Does not get stuck.** A download that has not moved for 5 minutes is restarted, so it finds peers that came
+  online since.
 - **Status page** in the admin panel: speed, peers (TCP and uTP), progress and time left for every episode,
   updated live.
 - **Keeps the disk tidy.** Torrents nobody has watched for 15 minutes are paused once they are done, and the
@@ -67,4 +69,4 @@ click, or switch on **Update automatically** to have new versions installed by t
 nobody is watching.
 
 To release a new version: raise `version` in `plugin.json`, commit, and publish a GitHub release tagged
-`v<version>` (e.g. `v1.5.2`).
+`v<version>` (e.g. `v1.5.3`).

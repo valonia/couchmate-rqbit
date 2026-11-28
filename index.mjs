@@ -141,6 +141,29 @@ export default function setup(api) {
   const sweep = setInterval(() => tidy().catch(() => {}), 5 * 60 * 1000);
   const firstSweep = setTimeout(() => tidy().catch(() => {}), 30 * 1000); // e.g. keeps the .torrent files soon after a start
 
+  // A download that has not moved for a while is paused and started again. rqbit does not try peers again once it
+  // has given up on them all, but a restart asks the trackers and the DHT afresh – and finds the ones that came
+  // online since.
+  const STALL_MS = 5 * 60 * 1000;
+  const progressOf = new Map(); // hash → { bytes, since }
+  async function unstick() {
+    const have = await present();
+    if (!have) return;
+    for (const hash of progressOf.keys()) if (!have.has(hash)) progressOf.delete(hash);
+    for (const [hash] of have) {
+      const s = await call('GET', `/torrents/${hash}/stats/v1`).catch(() => null);
+      if (!s || s.state !== 'live' || s.finished) { progressOf.delete(hash); continue; }
+      const last = progressOf.get(hash);
+      if (!last || s.progress_bytes !== last.bytes) { progressOf.set(hash, { bytes: s.progress_bytes, since: Date.now() }); continue; }
+      if (Date.now() - last.since < STALL_MS) continue;
+      progressOf.set(hash, { bytes: s.progress_bytes, since: Date.now() }); // at most once per STALL_MS
+      await call('POST', `/torrents/${hash}/pause`).catch(() => {});
+      await call('POST', `/torrents/${hash}/start`).catch(() => {});
+      api.log(`[rqbit] "${find(hash)?.name || hash}" had not moved for ${STALL_MS / 60000} minutes – started again to look for new peers`);
+    }
+  }
+  const stallCheck = setInterval(() => unstick().catch(() => {}), 60 * 1000);
+
   // ------------------------------------------------------------------ adding and removing
 
   /** Adds a torrent: rqbit only lists its files (nothing downloads until someone watches). */
@@ -555,5 +578,5 @@ document.querySelectorAll('[data-all]').forEach((a) => a.addEventListener('click
 
   api.link('rqbit', `${base}/admin`);
 
-  return () => { clearInterval(sweep); clearTimeout(firstSweep); };
+  return () => { clearInterval(sweep); clearInterval(stallCheck); clearTimeout(firstSweep); };
 }
